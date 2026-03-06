@@ -92,7 +92,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rpmsgfs_server"
+name = "rpmsgfs-server"
 version = "0.1.0"
 dependencies = [
  "bincode",
