@@ -8,29 +8,125 @@
 
 use serde_derive::{Deserialize, Serialize};
 
-// commands
+// CMD_INIT
+// out: (Header)
 pub const _CMD_INIT: u32 = 0;
+
+// CMD_OPEN
+// in : (Header + Open + name:[u8])
+// out: (Header)
 pub const CMD_OPEN: u32 = 1;
+
+// CMD_CLOSE
+// in : (Header + fd:i32)
+// out: (Header)
 pub const CMD_CLOSE: u32 = 2;
+
+// CMD_READ
+// in : (Header + FileContent)
+// out: (Header + FileContent + content:[u8])
+// out: (Header + FileContent + content:[u8])
+// out: ..
+// out: (Header)
 pub const CMD_READ: u32 = 3;
+
+// CMD_WRITE
+// in : (Header + FileContent + content:[u8])
+// in : (Header + FileContent + content:[u8])
+// in : ..
+// in : (Header + FileContent)
+// out: (Header)
 pub const CMD_WRITE: u32 = 4;
+
+// CMD_SEEK
+// in : (Header + Seek)
+// out: (Header)
 pub const CMD_SEEK: u32 = 5;
+
+// CMD_IOCTL
+// Not supported
 pub const _CMD_IOCTL: u32 = 6;
+
+// CMD_SYNC
+// in : (Header + fd:i32)
+// out: (Header)
 pub const CMD_SYNC: u32 = 7;
+
+// _CMD_DUP
+// Not supported
 pub const _CMD_DUP: u32 = 8;
+
+// CMD_FSTAT
+// in : (Header + Stat + fd:i32)
+// out: (Header + Stat)
 pub const CMD_FSTAT: u32 = 9;
+
+// CMD_FTRUNCATE
+// in : (Header + FTruncate)
+// out: (Header)
 pub const CMD_FTRUNCATE: u32 = 10;
+
+// CMD_OPENDIR
+// in : (Header + name:[u8])
+// out: (Header)
 pub const CMD_OPENDIR: u32 = 11;
+
+// CMD_READDIR
+// in : (Header + ReadDir)
+// out: (Header + ReadDir + name:[u8])
+// out: (Header + ReadDir + name:[u8])
+// ..
+// out: (Header)
 pub const CMD_READDIR: u32 = 12;
+
+// CMD_REWINDDIR
+// in : (Header + dir_id:i32)
+// out: (Header)
 pub const CMD_REWINDDIR: u32 = 13;
+
+// CMD_CLOSEDIR
+// in : (Header + dir_id:i32)
+// out: (Header)
 pub const CMD_CLOSEDIR: u32 = 14;
+
+// CMD_STATFS
+// in : (Header + Statfs + name:[u8])
+// out: (Header + Statfs)
 pub const CMD_STATFS: u32 = 15;
+
+// CMD_UNLINK
+// in : (Header + name:[u8])
+// out: (Header)
 pub const CMD_UNLINK: u32 = 16;
+
+// CMD_MKDIR
+// in : (Header + MkDir + name:[u8])
+// out: (Header)
 pub const CMD_MKDIR: u32 = 17;
+
+// CMD_UNLINK
+// in : (Header + name:[u8])
+// out: (Header)
 pub const CMD_RMDIR: u32 = 18;
+
+// CMD_RENAME
+// in : (Header + path_from:[u8]) + path_to:[u8])
+// out: (Header)
 pub const CMD_RENAME: u32 = 19;
+
+// CMD_STAT
+// in : (Header + Stat + name:[u8])
+// out: (Header + Stat)
 pub const CMD_STAT: u32 = 20;
+
+// CMD_FCHSTAT
+// in : (Header + Chstat + fd:i32)
+// out: (Header)
 pub const CMD_FCHSTAT: u32 = 21;
+
+// CMD_CHSTAT
+// in : (Header + Chstat + name:[u8])
+// out: (Header)
 pub const CMD_CHSTAT: u32 = 22;
 
 // open file flags
@@ -74,15 +170,12 @@ pub struct Header {
 pub struct Open {
     pub flags: i32,
     pub mode: u32,
-    //pathname: [u8],
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct FileContent {
-    // read and write
     pub fd: i32,
     pub content_size: u32,
-    //pathname: [u8],
 }
 
 #[derive(Deserialize)]
@@ -102,7 +195,6 @@ pub struct FTruncate {
 pub struct ReadDir {
     pub dir_id: i32,
     pub item_type: u32,
-    //name: [u8],
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -124,18 +216,12 @@ pub struct Stat {
     pub gid: i16,       /* Group ID of file */
     pub blksize: i16,   /* Block size used for filesystem I/O */
     pub reserved: u16,  /* Reserved space */
-                        // union
-                        //  - s32 fd
-                        //  - char pathname[]
 }
 
 #[derive(Deserialize)]
 pub struct Chstat {
     pub stat: Stat,
     pub _flags: i16, /* flags */
-                     // union
-                     //  - s32 fd
-                     //  - char pathname[]
 }
 
 #[derive(Serialize)]
@@ -149,12 +235,10 @@ pub struct Statfs {
     pub bavail: u64,
     pub files: u64,
     pub ffree: u64,
-    //pathname: [u8],
 }
 
 #[derive(Deserialize)]
 pub struct MkDir {
     pub mode: u32,
     pub _reserved: u32,
-    //pathname: [u8],
 }
