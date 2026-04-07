@@ -326,7 +326,7 @@ impl Rpmsgfs {
         let file_descriptor: i32 = bincode::deserialize(&data[path_offset..]).unwrap();
 
         let (_, path) = self.files.get_mut(file_descriptor)?;
-        info!("stat {:?}", path);
+        info!("fstat {:?}", path);
 
         Self::stat_helper(path)
     }
@@ -397,13 +397,13 @@ impl Rpmsgfs {
     }
 
     fn mkdir(&mut self, _header: &msgs::Header, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
-        let readdir_data: msgs::MkDir = bincode::deserialize(&data).unwrap();
+        let mkdir_data: msgs::MkDir = bincode::deserialize(&data).unwrap();
         let path_offset = std::mem::size_of::<msgs::MkDir>();
         let path = str_from_u8_nul_utf8(&data[path_offset..]);
         info!("mkdir {:?}", path);
 
         std::fs::DirBuilder::new()
-            .mode(readdir_data.mode)
+            .mode(mkdir_data.mode)
             .create(path)?;
         Ok((0, vec![]))
     }
