@@ -102,7 +102,7 @@ impl Rpmsgfs {
         let fd: i32 = bincode::deserialize(&data).unwrap();
         info!("close {:}", fd);
 
-        self.directories.remove(fd)?;
+        self.files.remove(fd)?;
         Ok((0, vec![]))
     }
 
