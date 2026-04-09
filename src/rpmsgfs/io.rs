@@ -26,7 +26,7 @@ impl Io {
             .read(true)
             .open(device_filename)
             .expect("rpmsg device not found");
-        f.write_all(b"Hello").expect("Cannot write");
+        f.write_all(b"\0\0\0\0HELLO.......").expect("Cannot write");
         Io {
             rpmsg_character_device: f,
         }
