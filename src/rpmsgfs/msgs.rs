@@ -9,6 +9,7 @@
 use serde_derive::{Deserialize, Serialize};
 
 // commands
+pub const _CMD_INIT: u32 = 0;
 pub const CMD_OPEN: u32 = 1;
 pub const CMD_CLOSE: u32 = 2;
 pub const CMD_READ: u32 = 3;
