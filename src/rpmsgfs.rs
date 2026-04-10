@@ -20,14 +20,16 @@ pub struct Rpmsgfs {
     rpmsgfs_io: io::Io,
     files: map::Map<File>,
     directories: map::Map<ReadDir>,
+    export_path: String,
 }
 
 impl Rpmsgfs {
-    pub fn new(device_filename: String) -> Rpmsgfs {
+    pub fn new(device_filename: String, export_path: String) -> Rpmsgfs {
         Rpmsgfs {
             rpmsgfs_io: io::Io::new(device_filename),
             files: map::Map::new(),
             directories: map::Map::new(),
+            export_path: export_path,
         }
     }
 
@@ -40,7 +42,7 @@ impl Rpmsgfs {
         let data_offset = std::mem::size_of::<msgs::Header>();
         let data = &buf[data_offset..];
         let result: Result<(i32, Vec<u8>), _> = match header.command {
-            msgs::CMD_OPEN => commands::open(&mut self.files, &data),
+            msgs::CMD_OPEN => commands::open(&mut self.files, &self.export_path, &data),
             msgs::CMD_CLOSE => commands::close(&mut self.files, &data),
             msgs::CMD_READ => commands::read(&mut self.files, &mut self.rpmsgfs_io, &header, &data),
             msgs::CMD_WRITE => commands::write(&mut self.files, &header, &data),
@@ -50,18 +52,18 @@ impl Rpmsgfs {
             //msgs::CMD_DUP
             msgs::CMD_FSTAT => commands::fstat(&mut self.files, &data),
             msgs::CMD_FTRUNCATE => commands::ftruncate(&mut self.files, &data),
-            msgs::CMD_OPENDIR => commands::opendir(&mut self.directories, &data),
+            msgs::CMD_OPENDIR => commands::opendir(&mut self.directories, &self.export_path, &data),
             msgs::CMD_READDIR => commands::readdir(&mut self.directories, &data),
             msgs::CMD_REWINDDIR => commands::rewinddir(&mut self.directories, &data),
             msgs::CMD_CLOSEDIR => commands::closedir(&mut self.directories, &data),
-            msgs::CMD_STATFS => commands::statfs(&data),
-            msgs::CMD_UNLINK => commands::unlink(&data),
-            msgs::CMD_MKDIR => commands::mkdir(&data),
-            msgs::CMD_RMDIR => commands::rmdir(&data),
-            msgs::CMD_RENAME => commands::rename(&data),
-            msgs::CMD_STAT => commands::stat(&data),
+            msgs::CMD_STATFS => commands::statfs(&self.export_path, &data),
+            msgs::CMD_UNLINK => commands::unlink(&self.export_path, &data),
+            msgs::CMD_MKDIR => commands::mkdir(&self.export_path, &data),
+            msgs::CMD_RMDIR => commands::rmdir(&self.export_path, &data),
+            msgs::CMD_RENAME => commands::rename(&self.export_path, &data),
+            msgs::CMD_STAT => commands::stat(&self.export_path, &data),
             msgs::CMD_FCHSTAT => commands::fchstat(&mut self.files, &data),
-            msgs::CMD_CHSTAT => commands::chstat(&data),
+            msgs::CMD_CHSTAT => commands::chstat(&self.export_path, &data),
             _ => Err(Error::from_raw_os_error(-libc::ENOTSUP)),
         };
         match result {

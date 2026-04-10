@@ -13,6 +13,10 @@ use crate::rpmsgfs::Rpmsgfs;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Export path
+    #[arg(short, long, default_value_t = String::from("/"))]
+    export_path: String,
+
     /// RPMsg device
     #[arg(required = true)]
     rpmsg_device: String,
@@ -23,7 +27,7 @@ fn main() {
 
     std_logger::Config::logfmt().init();
 
-    let mut rpmsgfs = Rpmsgfs::new(args.rpmsg_device);
+    let mut rpmsgfs = Rpmsgfs::new(args.rpmsg_device, args.export_path);
 
     loop {
         rpmsgfs.process_command()
