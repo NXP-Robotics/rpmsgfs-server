@@ -22,6 +22,9 @@ use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
 
 pub const RESULT_DO_NOT_SEND_RESPONSE: i32 = 0xAAAA;
 const MAX_CONTENT_SIZE: usize = 200;
@@ -34,11 +37,100 @@ fn str_from_u8_nul_utf8(utf8_src: &[u8]) -> &str {
     ::std::str::from_utf8(&utf8_src[0..nul_range_end]).unwrap_or("")
 }
 
-pub fn open(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+pub fn normalize_lexically(pathbuf: &PathBuf) -> Result<PathBuf, Error> {
+    let mut lexical = PathBuf::new();
+    let mut iter = pathbuf.components().peekable();
+
+    // Find the root, if any, and add it to the lexical path.
+    // Here we treat the Windows path "C:\" as a single "root" even though
+    // `components` splits it into two: (Prefix, RootDir).
+    let root = match iter.peek() {
+        Some(Component::ParentDir) => return Err(Error::from_raw_os_error(libc::ENOENT)),
+        Some(p @ Component::RootDir) | Some(p @ Component::CurDir) => {
+            lexical.push(p);
+            iter.next();
+            lexical.as_os_str().len()
+        }
+        Some(Component::Prefix(prefix)) => {
+            lexical.push(prefix.as_os_str());
+            iter.next();
+            if let Some(p @ Component::RootDir) = iter.peek() {
+                lexical.push(p);
+                iter.next();
+            }
+            lexical.as_os_str().len()
+        }
+        None => return Ok(PathBuf::new()),
+        Some(Component::Normal(_)) => 0,
+    };
+
+    for component in iter {
+        match component {
+            Component::RootDir => unreachable!(),
+            Component::Prefix(_) => return Err(Error::from_raw_os_error(libc::ENOENT)),
+            Component::CurDir => continue,
+            Component::ParentDir => {
+                // It's an error if ParentDir causes us to go above the "root".
+                if lexical.as_os_str().len() == root {
+                    return Err(Error::from_raw_os_error(libc::ENOENT));
+                } else {
+                    lexical.pop();
+                }
+            }
+            Component::Normal(path) => lexical.push(path),
+        }
+    }
+    Ok(lexical)
+}
+
+fn normalize_path(export_path: &String, path: &str) -> Result<String, Error> {
+    let mut first = export_path.clone();
+    if !export_path.is_empty() && export_path.chars().last().unwrap() == '/' {
+        first.pop();
+    }
+
+    let second: String = if !path.is_empty() {
+        if path.chars().next().unwrap() == '/' {
+            path.to_string()
+        } else {
+            String::from("/") + path
+        }
+    } else {
+        String::from("")
+    };
+
+    let all = first.clone() + second.as_str();
+
+    let pathbuf = Path::new(&all).to_path_buf();
+
+    // TODO: use pathbuf.normalize_lexically once rust issue 134694 is solved
+    match normalize_lexically(&pathbuf) {
+        Ok(result) => {
+            let normalized_path = result.into_os_string().into_string().unwrap();
+            if normalized_path.starts_with(&first) {
+                Ok(normalized_path)
+            } else {
+                Err(Error::from_raw_os_error(libc::ENOENT))
+            }
+        }
+        Err(_) => Err(Error::from_raw_os_error(libc::ENOENT)),
+    }
+}
+
+fn get_path_and_verify(export_path: &String, utf8_src: &[u8]) -> Result<String, Error> {
+    let path = str_from_u8_nul_utf8(utf8_src);
+    normalize_path(export_path, path)
+}
+
+pub fn open(
+    files: &mut map::Map<File>,
+    export_path: &String,
+    data: &[u8],
+) -> Result<(i32, Vec<u8>), Error> {
     let open_data: msgs::Open = deserialize(&data).unwrap();
 
     let path_offset = std::mem::size_of::<msgs::Open>();
-    let path = str_from_u8_nul_utf8(&data[path_offset..]);
+    let path = get_path_and_verify(export_path, &data[path_offset..])?;
     info!(
         "open {:?}, mode:{:o}, flags:0x{:x}",
         path, open_data.mode, open_data.flags
@@ -78,9 +170,9 @@ pub fn open(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8>), E
         .truncate((open_data.flags & msgs::O_TRUNC) == msgs::O_TRUNC)
         .custom_flags(custom_flags)
         .mode(open_data.mode)
-        .open(path)?;
+        .open(path.clone())?;
 
-    Ok((files.add(file, path.to_string()), vec![]))
+    Ok((files.add(file, path), vec![]))
 }
 
 pub fn close(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
@@ -190,12 +282,16 @@ pub fn ftruncate(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8
     Ok((0, vec![]))
 }
 
-pub fn opendir(directories: &mut map::Map<ReadDir>, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
-    let path = str_from_u8_nul_utf8(&data);
+pub fn opendir(
+    directories: &mut map::Map<ReadDir>,
+    export_path: &String,
+    data: &[u8],
+) -> Result<(i32, Vec<u8>), Error> {
+    let path = get_path_and_verify(export_path, &data)?;
     info!("opendir {:?}", path);
 
-    let dir = fs::read_dir(path)?;
-    Ok((directories.add(dir, path.to_string()), vec![]))
+    let dir = fs::read_dir(path.clone())?;
+    Ok((directories.add(dir, path), vec![]))
 }
 
 fn convert_file_type(dir_entry: &std::fs::DirEntry) -> u32 {
@@ -247,7 +343,6 @@ pub fn readdir(directories: &mut map::Map<ReadDir>, data: &[u8]) -> Result<(i32,
 
 pub fn rewinddir(
     directories: &mut map::Map<ReadDir>,
-
     data: &[u8],
 ) -> Result<(i32, Vec<u8>), Error> {
     let dir_id: i32 = deserialize(&data).unwrap();
@@ -267,13 +362,13 @@ pub fn closedir(directories: &mut map::Map<ReadDir>, data: &[u8]) -> Result<(i32
     Ok((0, vec![]))
 }
 
-pub fn statfs(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+pub fn statfs(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
     let path_offset = std::mem::size_of::<msgs::Statfs>();
-    let path = str_from_u8_nul_utf8(&data[path_offset..]);
+    let path = get_path_and_verify(export_path, &data[path_offset..])?;
 
     info!("statfs {:?}", path);
 
-    match nix::sys::statfs::statfs(if path.is_empty() { "/" } else { path }) {
+    match nix::sys::statfs::statfs(if path.is_empty() { "/" } else { &path }) {
         Ok(statfs) => {
             let statfs_data = msgs::Statfs {
                 fstype: u32::try_from(statfs.filesystem_type().0).unwrap_or(0),
@@ -326,12 +421,12 @@ pub fn fstat(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8>), 
     stat_helper(path)
 }
 
-pub fn stat(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+pub fn stat(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
     let path_offset = std::mem::size_of::<msgs::Stat>();
-    let path = str_from_u8_nul_utf8(&data[path_offset..]);
+    let path = get_path_and_verify(export_path, &data[path_offset..])?;
     info!("stat {:?}", path);
 
-    stat_helper(path)
+    stat_helper(path.as_str())
 }
 
 fn chstat_helper(path: &str, chstat_data: &msgs::Chstat) -> Result<(), Error> {
@@ -373,28 +468,28 @@ pub fn fchstat(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8>)
     Ok((0, vec![]))
 }
 
-pub fn chstat(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+pub fn chstat(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
     let chstat_data: msgs::Chstat = deserialize(&data).unwrap();
     let path_offset = std::mem::size_of::<msgs::Chstat>();
-    let path = str_from_u8_nul_utf8(&data[path_offset..]);
+    let path = get_path_and_verify(export_path, &data[path_offset..])?;
     info!("chstat {:?}", path);
 
-    chstat_helper(path, &chstat_data)?;
+    chstat_helper(path.as_str(), &chstat_data)?;
     Ok((0, vec![]))
 }
 
-pub fn unlink(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
-    let path = str_from_u8_nul_utf8(&data);
+pub fn unlink(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+    let path = get_path_and_verify(export_path, &data)?;
     info!("unlink {:?}", path);
 
     fs::remove_file(path)?;
     Ok((0, vec![]))
 }
 
-pub fn mkdir(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+pub fn mkdir(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
     let mkdir_data: msgs::MkDir = deserialize(&data).unwrap();
     let path_offset = std::mem::size_of::<msgs::MkDir>();
-    let path = str_from_u8_nul_utf8(&data[path_offset..]);
+    let path = get_path_and_verify(export_path, &data[path_offset..])?;
     info!("mkdir {:?}", path);
 
     std::fs::DirBuilder::new()
@@ -403,18 +498,18 @@ pub fn mkdir(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
     Ok((0, vec![]))
 }
 
-pub fn rmdir(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
-    let path = str_from_u8_nul_utf8(&data);
+pub fn rmdir(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+    let path = get_path_and_verify(export_path, &data)?;
     info!("rmdir {:?}", path);
 
     fs::remove_dir(path)?;
     Ok((0, vec![]))
 }
 
-pub fn rename(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
-    let path_from = str_from_u8_nul_utf8(&data);
+pub fn rename(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+    let path_from = get_path_and_verify(export_path, &data)?;
     let path_to_offset = (path_from.len() + 1 + 0x7) & !0x7;
-    let path_to = str_from_u8_nul_utf8(&data[path_to_offset..]);
+    let path_to = get_path_and_verify(export_path, &data[path_to_offset..])?;
     info!("rename {:?}->{:?}", path_from, path_to);
 
     fs::rename(path_from, path_to)?;
@@ -425,7 +520,39 @@ pub fn rename(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
 mod test_commands {
     use crate::rpmsgfs::commands;
     use crate::rpmsgfs::commands::*;
+    use parameterized::parameterized;
     use serde_derive::Serialize;
+
+    #[parameterized(data = {
+        ("/tmp", "/tmp", "/"),
+        ("/tmp", "/tmp", ""),
+        ("/tmp", "", "tmp"),
+        ("/tmp/test", "/tmp/", "/test"),
+        ("/tmp/test", "/tmp", "test"),
+        ("/tmp/test", "/tmp", "just_a_dir/just_another_dir/../../just_a_dir/../test"),
+    })]
+    fn test_normalize_path(data: (&str, &str, &str)) {
+        let (expected, export_path, path) = data;
+        assert_eq!(
+            expected,
+            normalize_path(&String::from(export_path), path).unwrap()
+        );
+    }
+
+    #[parameterized(data = {
+        ("/tmp/just_a_dir", "../may_not_be_seen"),
+        ("/tmp/just_a_dir", "just_another_dir/../../may_not_be_seen"),
+    })]
+    fn test_normalize_path_should_fail(data: (&str, &str)) {
+        let (export_path, path) = data;
+        assert_eq!(
+            libc::ENOENT,
+            normalize_path(&String::from(export_path), path)
+                .unwrap_err()
+                .raw_os_error()
+                .unwrap()
+        );
+    }
 
     #[derive(Serialize)]
     pub struct Open {
@@ -441,7 +568,7 @@ mod test_commands {
         .unwrap();
         let binding = [open_data, path.as_bytes().to_vec()].concat();
         let combined = binding.as_slice();
-        commands::open(files, &combined)
+        commands::open(files, &"/tmp".to_string(), &combined)
     }
 
     #[test]
@@ -449,7 +576,7 @@ mod test_commands {
         let mut files: map::Map<File> = map::Map::new();
 
         let open_result = open(
-            "/tmp/blieb".to_string(),
+            "/blieb".to_string(),
             msgs::O_CREAT | msgs::O_WRITE,
             &mut files,
         )
@@ -461,6 +588,7 @@ mod test_commands {
     fn test_open_fails_when_reading_not_existing_file() {
         let mut files: map::Map<File> = map::Map::new();
 
+        let _ = fs::remove_file("/tmp/blieb");
         let open_result = open("/blieb".to_string(), msgs::O_READ, &mut files);
         assert_eq!(
             open_result.map_err(|e| e.kind()),
@@ -469,7 +597,7 @@ mod test_commands {
     }
 
     fn opendir(path: String, directories: &mut map::Map<ReadDir>) -> (i32, Vec<u8>) {
-        commands::opendir(directories, path.as_bytes()).unwrap()
+        commands::opendir(directories, &"/tmp".to_string(), path.as_bytes()).unwrap()
     }
 
     fn readdir(dir_id: i32, directories: &mut map::Map<ReadDir>) -> (i32, Vec<u8>) {
