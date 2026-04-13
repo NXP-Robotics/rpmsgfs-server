@@ -165,12 +165,15 @@ impl Rpmsgfs {
 
         let (file, _) = self.files.get_mut(seek_data.fd)?;
 
-        file.seek(match seek_data.whence {
+        let result = file.seek(match seek_data.whence {
             0 => std::io::SeekFrom::Start(seek_data.offset as u64),
             2 => std::io::SeekFrom::End(seek_data.offset as i64),
             _ => std::io::SeekFrom::Current(seek_data.offset as i64),
         })?;
-        Ok((0, vec![]))
+        match result.try_into() {
+            Ok(result_offset) => Ok((result_offset, vec![])),
+            Err(_) => Err(Error::from_raw_os_error(libc::EFAULT)),
+        }
     }
 
     fn sync(&mut self, _header: &msgs::Header, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
