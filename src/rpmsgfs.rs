@@ -7,7 +7,7 @@
  */
 
 use bincode::serialize;
-use log::{info, trace};
+use log::{info, trace, warn};
 use nix::libc;
 use std::fs;
 use std::fs::File;
@@ -464,15 +464,20 @@ impl Rpmsgfs {
                 if result != RESULT_DO_NOT_SEND_RESPONSE {
                     self.rpmsgfs_io
                         .send_response(&header, result, response_data)
-                        .expect("Cannot send rename response to rpmsg characted device");
+                        .expect("Cannot send response to rpmsg characted device");
                 } else {
                 }
             }
 
             Err(e) => {
+                let os_error = match e.raw_os_error() {
+                    Some(i) => i,
+                    None => libc::EIO,
+                };
+                warn!("Respond error: os_error={}, details={}", os_error, e);
                 self.rpmsgfs_io
-                    .send_response(&header, -e.raw_os_error().unwrap(), vec![])
-                    .expect("Cannot send rename response to rpmsg characted device");
+                    .send_response(&header, -os_error, vec![])
+                    .expect("Cannot send response to rpmsg characted device");
             }
         };
     }
