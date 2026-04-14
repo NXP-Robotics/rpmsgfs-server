@@ -10,7 +10,6 @@ use log::info;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::path::Path;
 
 use crate::rpmsgfs::msgs;
 
@@ -19,7 +18,7 @@ pub struct Io {
 }
 
 impl Io {
-    pub fn new(device_filename: &Path) -> Io {
+    pub fn new(device_filename: String) -> Io {
         info!("open {:?}", device_filename);
         let mut f = OpenOptions::new()
             .append(true)

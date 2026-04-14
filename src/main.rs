@@ -6,18 +6,24 @@
  *
  */
 
-use std::path::Path;
+use clap::Parser;
 mod rpmsgfs;
 use crate::rpmsgfs::Rpmsgfs;
 
-fn main() {
-    std_logger::Config::logfmt().init();
-    let argument = std::env::args()
-        .nth(1)
-        .expect("No rpmsg device filename given");
-    let rpmsg_path = Path::new(&argument);
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// RPMsg device
+    #[arg(required = true)]
+    rpmsg_device: String,
+}
 
-    let mut rpmsgfs = Rpmsgfs::new(&rpmsg_path);
+fn main() {
+    let args = Args::parse();
+
+    std_logger::Config::logfmt().init();
+
+    let mut rpmsgfs = Rpmsgfs::new(args.rpmsg_device);
 
     loop {
         rpmsgfs.process_command()
