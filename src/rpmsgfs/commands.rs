@@ -160,12 +160,20 @@ pub fn open(
     } | match open_data.flags & msgs::O_NOATIME {
         msgs::O_NOATIME => libc::O_NOATIME,
         _ => 0,
+    } | match open_data.flags & msgs::O_CREAT {
+        msgs::O_CREAT => libc::O_CREAT,
+        _ => 0,
     };
+
+    // Note: The std::fs::OpenOptions::create function is not used because it
+    //       doesn't allow to open files with O_READ | O_CREAT.
+    //       Instead the create flag is passed to
+    //       std::os::unix::fs::OpenOptions::custom_flags in which the error
+    //       is not triggered.
 
     let file = std::fs::OpenOptions::new()
         .read((open_data.flags & msgs::O_READ) == msgs::O_READ)
         .write((open_data.flags & msgs::O_WRITE) == msgs::O_WRITE)
-        .create((open_data.flags & msgs::O_CREAT) == msgs::O_CREAT)
         .append((open_data.flags & msgs::O_APPEND) == msgs::O_APPEND)
         .truncate((open_data.flags & msgs::O_TRUNC) == msgs::O_TRUNC)
         .custom_flags(custom_flags)
@@ -571,6 +579,25 @@ mod test_commands {
         commands::open(files, &"/tmp".to_string(), &combined)
     }
 
+    fn write(fd: i32, data: &[u8], files: &mut map::Map<File>) -> Result<(i32, Vec<u8>), Error> {
+        let write_data = serialize(&msgs::FileContent {
+            fd: fd,
+            content_size: data.len().try_into().unwrap(),
+        })
+        .unwrap();
+        let binding = [write_data, data.to_vec()].concat();
+        let combined = binding.as_slice();
+        commands::write(
+            files,
+            &msgs::Header {
+                command: msgs::CMD_WRITE,
+                result: 0,
+                cookie: 0,
+            },
+            &combined,
+        )
+    }
+
     #[test]
     fn test_open() {
         let mut files: map::Map<File> = map::Map::new();
@@ -585,15 +612,28 @@ mod test_commands {
     }
 
     #[test]
+    fn test_open_file_with_only_read_and_create_flags() {
+        let mut files: map::Map<File> = map::Map::new();
+
+        let open_result = open(
+            "/opened_with_read_and_create_flags".to_string(),
+            msgs::O_CREAT | msgs::O_READ,
+            &mut files,
+        )
+        .unwrap();
+        assert_eq!(open_result.0 >= 0, true);
+
+        let write_result = write(open_result.0, "test".as_bytes(), &mut files);
+        assert_eq!(write_result.unwrap_err().raw_os_error(), Some(libc::EBADF));
+    }
+
+    #[test]
     fn test_open_fails_when_reading_not_existing_file() {
         let mut files: map::Map<File> = map::Map::new();
 
         let _ = fs::remove_file("/tmp/blieb");
         let open_result = open("/blieb".to_string(), msgs::O_READ, &mut files);
-        assert_eq!(
-            open_result.map_err(|e| e.kind()),
-            Err(std::io::ErrorKind::NotFound)
-        );
+        assert_eq!(open_result.unwrap_err().raw_os_error(), Some(libc::ENOENT));
     }
 
     fn opendir(path: String, directories: &mut map::Map<ReadDir>) -> (i32, Vec<u8>) {
