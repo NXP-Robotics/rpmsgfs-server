@@ -426,3 +426,51 @@ pub fn rename(data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
     fs::rename(path_from, path_to)?;
     Ok((0, vec![]))
 }
+
+#[cfg(test)]
+mod test_commands {
+    use crate::rpmsgfs::commands;
+    use crate::rpmsgfs::commands::*;
+    use serde_derive::Serialize;
+
+    #[derive(Serialize)]
+    pub struct Open {
+        pub flags: i32,
+        pub mode: u32,
+    }
+
+    fn open(path: String, flags: i32, files: &mut map::Map<File>) -> Result<(i32, Vec<u8>), Error> {
+        let open_data = serialize(&Open {
+            flags: flags,
+            mode: 0o644,
+        })
+        .unwrap();
+        let binding = [open_data, path.as_bytes().to_vec()].concat();
+        let combined = binding.as_slice();
+        commands::open(files, &combined)
+    }
+
+    #[test]
+    fn test_open() {
+        let mut files: map::Map<File> = map::Map::new();
+
+        let open_result = open(
+            "/tmp/blieb".to_string(),
+            msgs::O_CREAT | msgs::O_WRITE,
+            &mut files,
+        )
+        .unwrap();
+        assert_eq!(open_result.0 >= 0, true);
+    }
+
+    #[test]
+    fn test_open_fails_when_reading_not_existing_file() {
+        let mut files: map::Map<File> = map::Map::new();
+
+        let open_result = open("/blieb".to_string(), msgs::O_READ, &mut files);
+        assert_eq!(
+            open_result.map_err(|e| e.kind()),
+            Err(std::io::ErrorKind::NotFound)
+        );
+    }
+}
