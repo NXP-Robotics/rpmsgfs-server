@@ -41,7 +41,7 @@ pub struct Rpmsgfs {
 }
 
 impl Rpmsgfs {
-    pub fn new(device_filename: &std::path::Path) -> Rpmsgfs {
+    pub fn new(device_filename: String) -> Rpmsgfs {
         Rpmsgfs {
             rpmsgfs_io: io::Io::new(device_filename),
             files: map::Map::new(),
