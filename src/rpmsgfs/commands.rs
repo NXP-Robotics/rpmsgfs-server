@@ -190,19 +190,12 @@ pub fn ftruncate(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8
     Ok((0, vec![]))
 }
 
-fn opendir_helper(
-    directories: &mut map::Map<ReadDir>,
-    path: &String,
-) -> Result<(i32, Vec<u8>), Error> {
-    let dir = fs::read_dir(path)?;
-    Ok((directories.add(dir, path.to_string()), vec![]))
-}
-
 pub fn opendir(directories: &mut map::Map<ReadDir>, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
     let path = str_from_u8_nul_utf8(&data);
     info!("opendir {:?}", path);
 
-    opendir_helper(directories, &path.to_string())
+    let dir = fs::read_dir(path)?;
+    Ok((directories.add(dir, path.to_string()), vec![]))
 }
 
 fn convert_file_type(dir_entry: &std::fs::DirEntry) -> u32 {
@@ -261,8 +254,9 @@ pub fn rewinddir(
     info!("rewinddir {:}", dir_id);
 
     /* Rewind is not possible so just remove and reopen dir */
-    let (_, path) = directories.remove(dir_id)?;
-    opendir_helper(directories, &path)
+    let directory = directories.get_mut(dir_id)?;
+    directory.0 = fs::read_dir(&directory.1)?;
+    Ok((0, vec![]))
 }
 
 pub fn closedir(directories: &mut map::Map<ReadDir>, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
@@ -472,5 +466,41 @@ mod test_commands {
             open_result.map_err(|e| e.kind()),
             Err(std::io::ErrorKind::NotFound)
         );
+    }
+
+    fn opendir(path: String, directories: &mut map::Map<ReadDir>) -> (i32, Vec<u8>) {
+        commands::opendir(directories, path.as_bytes()).unwrap()
+    }
+
+    fn readdir(dir_id: i32, directories: &mut map::Map<ReadDir>) -> (i32, Vec<u8>) {
+        let readdir_data = serialize(&msgs::ReadDir {
+            dir_id: dir_id,
+            item_type: 0,
+        })
+        .unwrap();
+        commands::readdir(directories, readdir_data.as_slice()).unwrap()
+    }
+
+    fn rewinddir(dir_id: i32, directories: &mut map::Map<ReadDir>) -> (i32, Vec<u8>) {
+        let rewinddir_data = serialize(&dir_id).unwrap();
+        commands::rewinddir(directories, rewinddir_data.as_slice()).unwrap()
+    }
+
+    #[test]
+    fn test_rewinddir() {
+        let mut directories: map::Map<ReadDir> = map::Map::new();
+        let opendir_result = opendir("/".to_string(), &mut directories);
+        assert_eq!(opendir_result.0 >= 0, true);
+
+        let first_readdir_result = readdir(opendir_result.0, &mut directories);
+        assert_eq!(first_readdir_result.0, 0);
+
+        let rewinddir_result = rewinddir(opendir_result.0, &mut directories);
+        assert_eq!(rewinddir_result.0, 0);
+
+        // Do a read again and it should return the same name
+        let second_readdir_result = readdir(opendir_result.0, &mut directories);
+        assert_eq!(second_readdir_result.0, 0);
+        assert_eq!(first_readdir_result.1, second_readdir_result.1);
     }
 }
