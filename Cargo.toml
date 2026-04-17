@@ -1,7 +1,7 @@
 [package]
 name = "rpmsgfs-server"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 license = "BSD3"
 description = "A daemon that serves filesystem access through RpMsg"
 repository = "https://github.com/NXP-Robotics/rpmsgfs_server.git"
@@ -10,7 +10,7 @@ repository = "https://github.com/NXP-Robotics/rpmsgfs_server.git"
 
 [dependencies]
 bincode = "1.3.3"
-clap = { version = "4.6.0", features = ["derive"] }
+clap = { version = "4.4.30", features = ["derive"] }
 log = "0.4.29"
 nix = { version = "0.31.1", features = ["fs"] }
 parameterized = "2.1.0"
