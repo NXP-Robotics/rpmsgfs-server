@@ -136,7 +136,11 @@ pub fn open(
         path, open_data.mode, open_data.flags
     );
 
-    let custom_flags: i32 = match open_data.flags & msgs::O_NOFOLLOW {
+    let custom_flags: i32 = match open_data.flags & (msgs::O_WRITE | msgs::O_READ) {
+        /*msgs::O_WRITE | msgs::O_READ*/ 3 => libc::O_RDWR,
+        msgs::O_WRITE => libc::O_WRONLY,
+        _ => libc::O_RDONLY,
+    } | match open_data.flags & msgs::O_NOFOLLOW {
         msgs::O_NOFOLLOW => libc::O_NOFOLLOW,
         _ => 0,
     } | match open_data.flags & msgs::O_EXCL {
@@ -163,6 +167,12 @@ pub fn open(
     } | match open_data.flags & msgs::O_CREAT {
         msgs::O_CREAT => libc::O_CREAT,
         _ => 0,
+    } | match open_data.flags & msgs::O_APPEND {
+        msgs::O_APPEND => libc::O_APPEND,
+        _ => 0,
+    } | match open_data.flags & msgs::O_TRUNC {
+        msgs::O_TRUNC => libc::O_TRUNC,
+        _ => 0,
     };
 
     // Note: The std::fs::OpenOptions::create function is not used because it
@@ -174,8 +184,6 @@ pub fn open(
     let file = std::fs::OpenOptions::new()
         .read((open_data.flags & msgs::O_READ) == msgs::O_READ)
         .write((open_data.flags & msgs::O_WRITE) == msgs::O_WRITE)
-        .append((open_data.flags & msgs::O_APPEND) == msgs::O_APPEND)
-        .truncate((open_data.flags & msgs::O_TRUNC) == msgs::O_TRUNC)
         .custom_flags(custom_flags)
         .mode(open_data.mode)
         .open(path.clone())?;
@@ -627,6 +635,32 @@ mod test_commands {
         assert_eq!(write_result.unwrap_err().raw_os_error(), Some(libc::EBADF));
     }
 
+    fn create_test_file(path: String) {
+        let mut files: map::Map<File> = map::Map::new();
+
+        let create_result = open(path, msgs::O_CREAT | msgs::O_WRITE, &mut files).unwrap();
+
+        close(files, create_result.0);
+    }
+
+    #[test]
+    fn test_open_file_with_append_write_truct_flags_on_existing_file() {
+        create_test_file("/opened_with_append_write_and_trunc_flags".to_string());
+
+        let mut files: map::Map<File> = map::Map::new();
+
+        let open_result: (i32, Vec<u8>) = open(
+            "/opened_with_append_write_and_trunc_flags".to_string(),
+            msgs::O_APPEND | msgs::O_WRITE | msgs::O_TRUNC,
+            &mut files,
+        )
+        .unwrap();
+        assert_eq!(open_result.0 >= 0, true);
+
+        let write_result = write(open_result.0, "test".as_bytes(), &mut files).unwrap();
+        assert_eq!(write_result.0 >= 0, true);
+    }
+
     #[test]
     fn test_open_fails_when_reading_not_existing_file() {
         let mut files: map::Map<File> = map::Map::new();
@@ -652,6 +686,11 @@ mod test_commands {
     fn rewinddir(dir_id: i32, directories: &mut map::Map<ReadDir>) -> (i32, Vec<u8>) {
         let rewinddir_data = serialize(&dir_id).unwrap();
         commands::rewinddir(directories, rewinddir_data.as_slice()).unwrap()
+    }
+
+    fn close(mut files: map::Map<File>, fd: i32) {
+        let close_data = serialize(&fd).unwrap();
+        commands::close(&mut files, close_data.as_slice()).unwrap();
     }
 
     #[test]
