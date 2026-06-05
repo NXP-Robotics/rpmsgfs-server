@@ -136,7 +136,11 @@ pub fn open(
         path, open_data.mode, open_data.flags
     );
 
-    let custom_flags: i32 = match open_data.flags & msgs::O_NOFOLLOW {
+    let custom_flags: i32 = match open_data.flags & (msgs::O_WRITE | msgs::O_READ) {
+        /*msgs::O_WRITE | msgs::O_READ*/ 3 => libc::O_RDWR,
+        msgs::O_WRITE => libc::O_WRONLY,
+        _ => libc::O_RDONLY,
+    } | match open_data.flags & msgs::O_NOFOLLOW {
         msgs::O_NOFOLLOW => libc::O_NOFOLLOW,
         _ => 0,
     } | match open_data.flags & msgs::O_EXCL {
@@ -163,6 +167,12 @@ pub fn open(
     } | match open_data.flags & msgs::O_CREAT {
         msgs::O_CREAT => libc::O_CREAT,
         _ => 0,
+    } | match open_data.flags & msgs::O_APPEND {
+        msgs::O_APPEND => libc::O_APPEND,
+        _ => 0,
+    } | match open_data.flags & msgs::O_TRUNC {
+        msgs::O_TRUNC => libc::O_TRUNC,
+        _ => 0,
     };
 
     // Note: The std::fs::OpenOptions::create function is not used because it
@@ -174,8 +184,6 @@ pub fn open(
     let file = std::fs::OpenOptions::new()
         .read((open_data.flags & msgs::O_READ) == msgs::O_READ)
         .write((open_data.flags & msgs::O_WRITE) == msgs::O_WRITE)
-        .append((open_data.flags & msgs::O_APPEND) == msgs::O_APPEND)
-        .truncate((open_data.flags & msgs::O_TRUNC) == msgs::O_TRUNC)
         .custom_flags(custom_flags)
         .mode(open_data.mode)
         .open(path.clone())?;
@@ -625,6 +633,22 @@ mod test_commands {
 
         let write_result = write(open_result.0, "test".as_bytes(), &mut files);
         assert_eq!(write_result.unwrap_err().raw_os_error(), Some(libc::EBADF));
+    }
+
+    #[test]
+    fn test_open_file_existing_file() {
+        let mut files: map::Map<File> = map::Map::new();
+
+        let open_result = open(
+            "/opened_with_read_and_create_flags".to_string(),
+            msgs::O_APPEND | msgs::O_WRITE | msgs::O_TRUNC,
+            &mut files,
+        )
+        .unwrap();
+        assert_eq!(open_result.0 >= 0, true);
+
+        let write_result = write(open_result.0, "test".as_bytes(), &mut files).unwrap();
+        assert_eq!(write_result.0 >= 0, true);
     }
 
     #[test]
