@@ -175,18 +175,30 @@ pub fn open(
         _ => 0,
     };
 
+    let adapt_error = |result: std::io::Result<File>| -> std::io::Result<File> {
+        match result {
+            Ok(f) => Ok(f),
+            Err(e) => match e.raw_os_error() {
+                Some(_) => Err(e),
+                None => Err(Error::from_raw_os_error(libc::ENOENT)),
+            },
+        }
+    };
+
     // Note: The std::fs::OpenOptions::create function is not used because it
     //       doesn't allow to open files with O_READ | O_CREAT.
     //       Instead the create flag is passed to
     //       std::os::unix::fs::OpenOptions::custom_flags in which the error
     //       is not triggered.
 
-    let file = std::fs::OpenOptions::new()
-        .read((open_data.flags & msgs::O_READ) == msgs::O_READ)
-        .write((open_data.flags & msgs::O_WRITE) == msgs::O_WRITE)
-        .custom_flags(custom_flags)
-        .mode(open_data.mode)
-        .open(path.clone())?;
+    let file = adapt_error(
+        std::fs::OpenOptions::new()
+            .read((open_data.flags & msgs::O_READ) == msgs::O_READ)
+            .write((open_data.flags & msgs::O_WRITE) == msgs::O_WRITE)
+            .custom_flags(custom_flags)
+            .mode(open_data.mode)
+            .open(path.clone()),
+    )?;
 
     Ok((files.add(file, path), vec![]))
 }
