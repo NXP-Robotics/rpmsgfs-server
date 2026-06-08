@@ -403,7 +403,7 @@ pub fn statfs(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error
     }
 }
 
-fn stat_helper(path: &str) -> Result<(i32, Vec<u8>), Error> {
+fn stat_helper(path: &str) -> Result<Vec<u8>, Error> {
     let stat_result = nix::sys::stat::stat(path)?;
     let stat_response = msgs::Stat {
         dev: stat_result.st_dev as u32,
@@ -424,7 +424,7 @@ fn stat_helper(path: &str) -> Result<(i32, Vec<u8>), Error> {
         blksize: stat_result.st_blksize as i16,
         reserved: 0,
     };
-    Ok((0, serialize(&stat_response).unwrap()))
+    Ok(serialize(&stat_response).unwrap())
 }
 
 pub fn fstat(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
@@ -434,7 +434,10 @@ pub fn fstat(files: &mut map::Map<File>, data: &[u8]) -> Result<(i32, Vec<u8>), 
     let (_, path) = files.get_mut(file_descriptor)?;
     info!("fstat {:?}", path);
 
-    stat_helper(path)
+    match stat_helper(path) {
+        Ok(stat) => Ok((0, [stat, serialize(&file_descriptor).unwrap()].concat())),
+        Err(e) => Err(e),
+    }
 }
 
 pub fn stat(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
@@ -442,7 +445,14 @@ pub fn stat(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> 
     let path = get_path_and_verify(export_path, &data[path_offset..])?;
     info!("stat {:?}", path);
 
-    stat_helper(path.as_str())
+    let filename = match Path::new(&path).file_name() {
+        None => "",
+        Some(p) => p.to_str().unwrap(),
+    };
+    match stat_helper(path.as_str()) {
+        Ok(stat) => Ok((0, [stat, filename.as_bytes().to_vec()].concat())),
+        Err(e) => Err(e),
+    }
 }
 
 fn chstat_helper(path: &str, chstat_data: &msgs::Chstat) -> Result<(), Error> {
@@ -709,5 +719,35 @@ mod test_commands {
         let second_readdir_result = readdir(opendir_result.0, &mut directories);
         assert_eq!(second_readdir_result.0, 0);
         assert_eq!(first_readdir_result.1, second_readdir_result.1);
+    }
+
+    #[test]
+    fn test_zephyr_get_filename_back_in_stat_msg() {
+        let mut files: map::Map<File> = map::Map::new();
+
+        let fd = open(
+            "/stat_test_filename".to_string(),
+            msgs::O_CREAT | msgs::O_WRITE,
+            &mut files,
+        )
+        .unwrap();
+
+        close(files, fd.0);
+
+        let stat = msgs::Stat {
+            ..Default::default()
+        };
+
+        let stat_data = [
+            serialize(&stat).unwrap(),
+            "/stat_test_filename".as_bytes().to_vec(),
+        ]
+        .concat();
+        let stat_result = commands::stat(&"/tmp".to_string(), stat_data.as_slice()).unwrap();
+        assert_eq!(stat_result.0 >= 0, true);
+
+        let path_offset = std::mem::size_of::<msgs::Stat>();
+        let stat_result_filename = str_from_u8_nul_utf8(&stat_result.1[path_offset..]);
+        assert_eq!(stat_result_filename, "stat_test_filename".to_string());
     }
 }
