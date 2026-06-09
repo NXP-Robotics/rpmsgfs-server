@@ -544,10 +544,22 @@ pub fn rmdir(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error>
     Ok((0, vec![]))
 }
 
-pub fn rename(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
-    let path_from = get_path_and_verify(export_path, &data)?;
+fn get_path_from_and_path_to(
+    export_path: &String,
+    utf8_src: &[u8],
+) -> Result<(String, String), Error> {
+    let path_from = str_from_u8_nul_utf8(&utf8_src);
     let path_to_offset = (path_from.len() + 1 + 0x7) & !0x7;
-    let path_to = get_path_and_verify(export_path, &data[path_to_offset..])?;
+    let path_to = str_from_u8_nul_utf8(&utf8_src[path_to_offset..]);
+
+    Ok((
+        normalize_path(export_path, path_from)?,
+        normalize_path(export_path, path_to)?,
+    ))
+}
+
+pub fn rename(export_path: &String, data: &[u8]) -> Result<(i32, Vec<u8>), Error> {
+    let (path_from, path_to) = get_path_from_and_path_to(export_path, data)?;
     info!("rename {:?}->{:?}", path_from, path_to);
 
     fs::rename(path_from, path_to)?;
@@ -761,5 +773,30 @@ mod test_commands {
         let path_offset = std::mem::size_of::<msgs::Stat>();
         let stat_result_filename = str_from_u8_nul_utf8(&stat_result.1[path_offset..]);
         assert_eq!(stat_result_filename, "stat_test_filename".to_string());
+    }
+
+    #[parameterized(data = {
+        ("", "/from", "/to"),
+        ("", "/from6", "/to"),
+        ("", "/from67", "/to"),
+        ("", "/from678", "/to"),
+        ("", "/from6789abcdef", "/to"),
+        ("", "/from6789abcdef0", "/to"),
+        ("/tmp", "/from_abcdefghi", "/to"),
+    })]
+    fn test_get_two_paths_from_byte_buffer(data: (&str, &str, &str)) {
+        let (export_dir, path_from, path_to) = data;
+        let zeros_in_between = vec![0; 8 - path_from.len() % 8];
+        let data = [
+            path_from.as_bytes().to_vec(),
+            zeros_in_between,
+            path_to.as_bytes().to_vec(),
+        ]
+        .concat();
+        let (result_from, result_to) =
+            get_path_from_and_path_to(&export_dir.to_string(), &data).unwrap();
+
+        assert_eq!([export_dir, &path_from].join(""), result_from);
+        assert_eq!([export_dir, &path_to].join(""), result_to);
     }
 }
