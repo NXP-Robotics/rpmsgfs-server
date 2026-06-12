@@ -179,6 +179,7 @@ pub fn open(
         match result {
             Ok(f) => Ok(f),
             Err(e) => match e.raw_os_error() {
+                Some(libc::EINVAL) => Err(Error::from_raw_os_error(libc::ENOENT)),
                 Some(_) => Err(e),
                 None => Err(Error::from_raw_os_error(libc::ENOENT)),
             },
@@ -695,12 +696,25 @@ mod test_commands {
         assert_eq!(write_result.0 >= 0, true);
     }
 
-    #[test]
-    fn test_open_fails_when_reading_not_existing_file() {
+    #[parameterized(flags = {
+        0,
+        msgs::O_READ,
+        msgs::O_WRITE,
+        msgs::O_READ | msgs::O_WRITE,
+        msgs::O_APPEND,
+        msgs::O_APPEND | msgs::O_READ,
+        msgs::O_APPEND | msgs::O_WRITE,
+        msgs::O_APPEND | msgs::O_READ | msgs::O_WRITE,
+        msgs::O_TRUNC,
+        msgs::O_TRUNC | msgs::O_READ | msgs::O_WRITE,
+        msgs::O_TRUNC | msgs::O_APPEND,
+        msgs::O_TRUNC | msgs::O_APPEND | msgs::O_READ | msgs::O_WRITE,
+    })]
+    fn test_open_fails_when_reading_not_existing_file(flags: i32) {
         let mut files: map::Map<File> = map::Map::new();
 
         let _ = fs::remove_file("/tmp/blieb");
-        let open_result = open("/blieb".to_string(), msgs::O_READ, &mut files);
+        let open_result = open("/blieb".to_string(), flags, &mut files);
         assert_eq!(open_result.unwrap_err().raw_os_error(), Some(libc::ENOENT));
     }
 
