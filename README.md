@@ -1,16 +1,16 @@
 # rpmsgfs-server
 
-rpmsgfs-server is an **RPMsg File System server** implementation written in **Rust** and compatible with [NuttX RPMsgFS](https://nuttx.apache.org/docs/latest/components/filesystem/rpmsgfs.html).
-It is intended to run on the *master / host processor* in a heterogeneous multi-core system and export a local file system over **RPMsg** to a remote processor.
+rpmsgfs-server is a Rust-based RPMsg File System (RPMsgFS) server designed to run in Linux user space. It implements the RPMsgFS protocol originally introduced in NuttX and is compatible with both [NuttX RPMsgFS](https://nuttx.apache.org/docs/latest/components/filesystem/rpmsgfs.html) and Zephyr RPMsgFS implementations.
+This server is intended to run on the *master / host processor* in a heterogeneous multi-core system and export a local file system over **RPMsg** to a remote processor.
 
-This repository provides the server-side component of an RPMsg-based file system, enabling a remote core (for example running NuttX) to mount and access files that physically reside on the server core.
+This repository provides the server-side component, enabling a remote core (for example running NuttX) to mount and access files that physically reside on the server core.
 
 ## Features
 
 - RPMsg-based file system server
 - Written in **Rust**
 - Designed for heterogeneous SoCs (e.g. Cortex-A ↔ Cortex-M)
-- Compatible with [NuttX RPMsgFS](https://nuttx.apache.org/docs/latest/components/filesystem/rpmsgfs.html) client
+- Compatible with [NuttX](https://nuttx.apache.org) and [Zephyr](https://www.zephyrproject.org)
 
 ## Background
 
